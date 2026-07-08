@@ -11,9 +11,10 @@ seed: 1234
 __set_seed: !apply:speechbrain.utils.seed_everything [!ref <seed>]
 
 # ============ DATA DIRECTORIES ============
-# IMPORTANT: Replace !PLACEHOLDER with actual paths
-data_folder: !PLACEHOLDER # e.g., /path/to/amicorpus/
-manual_annot_folder: !PLACEHOLDER # e.g., /path/to/ami_public_manual_1.6.2/
+# TODO: Replace these with your actual paths
+# Download data from: http://groups.inf.ed.ac.uk/ami/download/
+data_folder: /home/user/datasets/amicorpus/
+manual_annot_folder: /home/user/datasets/ami_public_manual_1.6.2/
 
 # Output and checkpoint directories
 output_folder: results/ami/ecapa/
