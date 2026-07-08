@@ -1,0 +1,131 @@
+# ##################################################
+# Model: Speaker Diarization Baseline
+# Embeddings: Deep embedding (ECAPA-TDNN)
+# Clustering Technique: Spectral clustering
+# Authors: Nauman Dawalatabad 2020
+# Improved by: [Your Name]
+# ##################################################
+
+# ============ REPRODUCIBILITY ============
+seed: 1234
+__set_seed: !apply:speechbrain.utils.seed_everything [!ref <seed>]
+
+# ============ DATA DIRECTORIES ============
+# IMPORTANT: Replace !PLACEHOLDER with actual paths
+data_folder: !PLACEHOLDER # e.g., /path/to/amicorpus/
+manual_annot_folder: !PLACEHOLDER # e.g., /path/to/ami_public_manual_1.6.2/
+
+# Output and checkpoint directories
+output_folder: results/ami/ecapa/
+save_folder: !ref <output_folder>/save
+embedding_dir: !ref <save_folder>/embeddings
+meta_data_dir: !ref <save_folder>/metadata
+ref_rttm_dir: !ref <save_folder>/ref_rttms
+sys_rttm_dir: !ref <save_folder>/sys_rttms
+der_dir: !ref <save_folder>/DER
+
+skip_prep: False
+
+# ============ AUDIO PROCESSING ============
+sampling_rate: 16000
+n_mels: 80
+
+# Feature extraction parameters (now explicit)
+left_frames: 0  # Context frames before current frame
+right_frames: 0  # Context frames after current frame
+deltas: False  # Include delta features (temporal derivatives)
+
+# Subsegmentation: Split long utterances into chunks
+# This prevents memory issues and improves embedding quality
+max_subseg_dur: 3.0  # Maximum duration of subsegment in seconds
+overlap: 1.5  # Overlap between subsegments for temporal continuity
+
+# ============ EMBEDDING MODEL (ECAPA-TDNN) ============
+# Pre-trained model from HuggingFace Hub
+pretrain_path: speechbrain/spkrec-ecapa-voxceleb
+
+# Model architecture
+emb_dim: 192  # Final embedding dimension
+emb_channels: [1024, 1024, 1024, 1024, 3072]  # Channel dimensions per layer
+emb_attention_channels: 128  # Squeeze-excitation attention channels
+emb_lin_neurons: 192  # Linear output neurons
+
+# ============ CLUSTERING ============
+backend: 'SC'  # Options: 'SC' (Spectral Clustering), 'kmeans'
+affinity: 'cos'  # Affinity metric: 'cos' (cosine), 'nn' (nearest neighbor)
+
+# CRITICAL: Speaker count estimation
+# Option 1: Oracle (for evaluation only - requires ground truth)
+oracle_n_spkrs: True
+max_num_spkrs: 10  # Maximum speakers to consider
+
+# Option 2: Automatic estimation (uncomment to enable)
+# oracle_n_spkrs: False
+# est_n_spkrs: !new:speechbrain.processing.diarization.EigenGap
+#     metric: 'eigengap'  # Options: 'eigengap', 'silhouette'
+
+# Spectral Clustering specifics
+linkage: 'average'  # Options: 'average', 'complete', 'single', 'ward'
+eigen_solver: 'arpack'  # Options: 'arpack', 'lobpcg', 'amg'
+affinity_kwargs:
+    metric: !ref <affinity>  # Distance metric for affinity matrix
+
+# ============ AMI DATASET CONFIGURATION ============
+split_type: 'full_corpus_asr'  # Full corpus with ASR segmentation
+skip_TNO: True  # Skip Test-No-Oracle split
+mic_type: 'Mix-Headset'  # Options: 'Mix-Lapel', 'Mix-Headset', 'Array1', 'Array1-01', 'BeamformIt'
+
+dev_meta_file: !ref <meta_data_dir>/ami_dev.<mic_type>.subsegs.json
+eval_meta_file: !ref <meta_data_dir>/ami_eval.<mic_type>.subsegs.json
+
+# Voice Activity Detection
+vad_type: 'oracle'  # Options: 'oracle' (ground truth), 'pred' (predicted - not yet implemented)
+# TODO: Implement predicted VAD for real-world scenarios
+
+# ============ DIARIZATION ERROR RATE (DER) EVALUATION ============
+# These parameters define how to score the diarization output
+ignore_overlap: True  # Ignore overlapping speech regions in scoring
+forgiveness_collar: 0.25  # ±0.25s tolerance around speaker boundaries (in seconds)
+
+# ============ DATA LOADING ============
+batch_size: 512
+dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: 4  # Parallel workers for data loading
+    pin_memory: True  # Speed up GPU data transfer
+
+# ============ NEURAL NETWORK COMPONENTS ============
+
+compute_features: !new:speechbrain.lobes.features.Fbank
+    n_mels: !ref <n_mels>
+    sample_rate: !ref <sampling_rate>
+
+multimic_beamformer: !new:speechbrain.lobes.beamform_multimic.DelaySum_Beamformer
+    sampling_rate: !ref <sampling_rate>
+
+# Normalization for input features
+mean_var_norm: !new:speechbrain.processing.features.InputNormalization
+    norm_type: sentence  # Normalize per utterance
+    std_norm: False  # Don't normalize standard deviation
+
+# Embedding model
+embedding_model: !new:speechbrain.lobes.models.ECAPA_TDNN.ECAPA_TDNN
+    input_size: !ref <n_mels>
+    channels: !ref <emb_channels>
+    kernel_sizes: [5, 3, 3, 3, 1]
+    dilations: [1, 2, 3, 4, 1]
+    attention_channels: !ref <emb_attention_channels>
+    lin_neurons: !ref <emb_lin_neurons>
+
+# Normalization for embeddings
+mean_var_norm_emb: !new:speechbrain.processing.features.InputNormalization
+    norm_type: global  # Normalize across all embeddings
+    std_norm: False  # Don't normalize standard deviation
+
+# ============ PRE-TRAINED MODEL LOADING ============
+pretrainer: !new:speechbrain.utils.parameter_transfer.Pretrainer
+    collect_in: !ref <save_folder>
+    loadables:
+        embedding_model: !ref <embedding_model>
+    paths:
+        embedding_model: !ref <pretrain_path>/embedding_model.ckpt
